@@ -1,0 +1,202 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "uniqueId": {
+            "type": "string",
+            "defaultValue": "[newGuid()]"
+        },
+        "location": {
+            "type": "string",
+            "allowedValues": [
+                "EastUS",
+                "EastUS2",
+                "CentralUS",
+                "WestUS",
+                "WestUS2"
+            ],
+            "metadata": {
+                "description": "Location for the resourceGroup"
+            }
+        },
+        "resourcegroupName": {
+            "type": "string",
+            "defaultValue": "azure-ml-resourcegroup",
+            "metadata": {
+                "description": "Name of the resourceGroup to create"
+            }
+        },
+        "storageAccountSku": {
+            "type": "string",
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Standard_ZRS",
+                "Premium_LRS"
+            ],
+            "metadata": {
+                "description": "Storage Account type"
+            }
+        },
+        "hostingPlanSku": {
+            "type": "string",
+            "defaultValue": "Y1",
+            "allowedValues": [
+                "Y1"
+            ],
+            "metadata": {
+                "description": "The pricing tier for the App Service plan"
+            }
+        },
+        "packageURI": {
+            "type": "string",
+            "defaultValue": "https://github.com/davideker/machine-learning/raw/main/Deployment/functions.zip"
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Resources/resourceGroups",
+            "apiVersion": "2019-10-01",
+            "name": "[parameters('resourcegroupName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "Note": "subscription level deployment"
+            },
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2019-10-01",
+            "name": "azure-ml",
+            "resourceGroup": "[parameters('resourcegroupName')]",
+            "dependsOn": [
+                "[parameters('resourcegroupName')]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                    "scope": "inner"
+                },
+                "parameters": {
+                    "id": {
+                        "value": "[uniqueString(parameters('resourcegroupName'), deployment().name, parameters('uniqueId'))]"
+                    },
+                    "location": {
+                        "value": "[parameters('location')]"
+                    },
+                    "storageAccountSku": {
+                        "value": "[parameters('storageAccountSku')]"
+                    },
+                    "hostingPlanSku": {
+                        "value": "[parameters('hostingPlanSku')]"
+                    },
+                    "packageURI": {
+                        "value": "[parameters('packageURI')]"
+                    }
+                },
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "id": {
+                            "type": "string"
+                        },
+                        "location": {
+                            "type": "string"
+                        },
+                        "storageAccountSku": {
+                            "type": "string"
+                        },
+                        "hostingPlanSku": {
+                            "type": "string"
+                        },
+                        "packageURI": {
+                            "type": "string"
+                        }
+                    },
+                    "variables": {
+                        "storageAccount": "[concat('storage', parameters('id'))]",
+                        "hostingPlanName": "[concat(deployment().name,'-hosting-',  parameters('id'))]",
+                        "functionAppName": "[concat(deployment().name, '-function-app-',  parameters('id'))]"
+                    },
+                    "resources": [
+                        {
+                            "type": "Microsoft.Storage/storageAccounts",
+                            "apiVersion": "2019-06-01",
+                            "name": "[variables('storageAccount')]",
+                            "location": "[parameters('location')]",
+                            "sku": {
+                                "name": "[parameters('storageAccountSku')]"
+                            },
+                            "kind": "StorageV2",
+                            "properties": {
+                                "supportsHttpsTrafficOnly": true,
+                                "allowBlobPublicAccess": false
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Web/serverfarms",
+                            "apiVersion": "2019-08-01",
+                            "name": "[variables('hostingPlanName')]",
+                            "location": "[parameters('location')]",
+                            "kind": "linux",
+                            "properties": {
+                                "reserved": true
+                            },
+                            "sku": {
+                                "tier": "Dynamic",
+                                "name": "[parameters('hostingPlanSku')]"
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Web/sites",
+                            "apiVersion": "2019-08-01",
+                            "name": "[variables('functionAppName')]",
+                            "kind": "functionapp,linux",
+                            "location": "[parameters('location')]",
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccount'))]"
+                            ],
+                            "properties": {
+                                "name": "[variables('functionAppName')]",
+                                "siteConfig": {
+                                    "appSettings": [
+                                        {
+                                            "name": "FUNCTIONS_WORKER_RUNTIME",
+                                            "value": "python"
+                                        },
+                                        {
+                                            "name": "FUNCTIONS_EXTENSION_VERSION",
+                                            "value": "~3"
+                                        },
+                                        {
+                                            "name": "AzureWebJobsDashboard",
+                                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccount'), ';AccountKey=',listKeys(variables('storageAccount'), '2019-04-01').keys[0].value, ';EndpointSuffix=', environment().suffixes.storage)]"
+                                        },
+                                        {
+                                            "name": "AzureWebJobsStorage",
+                                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccount'), ';AccountKey=', listKeys(variables('storageAccount'),'2019-06-01').keys[0].value)]"
+                                        },
+                                        {
+                                            "name": "WEBSITE_RUN_FROM_PACKAGE",
+                                            "value": "[parameters('packageURI')]"
+                                        }
+                                    ],
+                                    "linuxFxVersion": "PYTHON|3.8"
+
+                                },
+                                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                                "clientAffinityEnabled": false
+                            },
+                            "resources": [
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "outputs": {}
+}

@@ -1,3 +1,6 @@
 /ml
 /.vscode
 Notes
+grammar.joblib
+.python_packages
+__pycache__
